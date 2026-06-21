@@ -72,7 +72,9 @@ int main() {
         UpdateCamera(&camera, CAMERA_ORBITAL);
         
         // Update module positions
-        UpdateElectronCloud(electronCloud, rng, dist, camera.position);
+        float customTimeStep = 0.02f;
+        UpdateElectronCloud(electronCloud, rng, dist, camera.position, GetFrameTime() * customTimeStep);
+        // UpdateElectronCloud(electronCloud, rng, dist, camera.position, 0.06f);
 
         // Rendering Pipeline Pass
         BeginTextureMode(target);

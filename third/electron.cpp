@@ -48,9 +48,10 @@ std::vector<ElectronParticle> GenerateElectronCloud(std::mt19937& rng, int parti
     return cloud;
 }
 
-void UpdateElectronCloud(std::vector<ElectronParticle>& cloud, std::mt19937& rng, std::uniform_real_distribution<float>& dist, Vector3 cameraPos) {
+void UpdateElectronCloud(std::vector<ElectronParticle>& cloud, std::mt19937& rng, std::uniform_real_distribution<float>& dist, Vector3 cameraPos, float timeStep) {
     for (auto& ep : cloud) {
-        float speedMult = ep.speed * 0.02f;
+        float speedMult = ep.speed * timeStep;
+        
         float cosS = std::cos(speedMult), sinS = std::sin(speedMult);
         float x = ep.position.x, z = ep.position.z;
 

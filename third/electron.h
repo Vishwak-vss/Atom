@@ -17,7 +17,7 @@ struct ElectronParticle {
 std::vector<ElectronParticle> GenerateElectronCloud(std::mt19937& rng, int particleCount);
 
 // Updates particle positions and paths (rotates around Y-axis)
-void UpdateElectronCloud(std::vector<ElectronParticle>& cloud, std::mt19937& rng, std::uniform_real_distribution<float>& dist, Vector3 cameraPos);
+void UpdateElectronCloud(std::vector<ElectronParticle>& cloud, std::mt19937& rng, std::uniform_real_distribution<float>& dist, Vector3 cameraPos, float timeStep);
 
 // Renders the cloud using billboard orb textures
 void DrawElectronCloud(const std::vector<ElectronParticle>& cloud, Camera3D camera, Texture2D orbTexture);
