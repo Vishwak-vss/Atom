@@ -5,21 +5,25 @@
 #include <vector>
 #include <random>
 
+// Enumerate the precise subshells of an Oxygen Atom
+enum OrbitalType {
+    ORBITAL_1S,
+    ORBITAL_2S,
+    ORBITAL_2PX,
+    ORBITAL_2PY,
+    ORBITAL_2PZ
+};
+
 struct ElectronParticle {
     Vector3 position;
     float alpha;
-    float speed;
-    float targetRadius;
     float distanceToCam;
+    OrbitalType type; // Track exact identity
 };
 
-// Generates the 4000 particles mapped to 1s, 2s, and 2p subshells
-std::vector<ElectronParticle> GenerateElectronCloud(std::mt19937& rng, int particleCount);
-
-// Updates particle positions and paths (rotates around Y-axis)
-void UpdateElectronCloud(std::vector<ElectronParticle>& cloud, std::mt19937& rng, std::uniform_real_distribution<float>& dist, Vector3 cameraPos, float timeStep);
-
-// Renders the cloud using billboard orb textures
+std::vector<ElectronParticle> GenerateQuantumCloud(std::mt19937& rng, int particleCount);
+void UpdateQuantumCloud(std::vector<ElectronParticle>& cloud, Vector3 cameraPos);
 void DrawElectronCloud(const std::vector<ElectronParticle>& cloud, Camera3D camera, Texture2D orbTexture);
-
+// Renders the mathematical boundary shapes for each orbital zone
+void DrawOrbitalBoundaries(Camera3D camera);
 #endif

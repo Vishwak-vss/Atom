@@ -1,83 +1,170 @@
 #include "electron.h"
-#include "raylib.h"
 #include "raymath.h"
+#include "rlgl.h"
 #include <cmath>
 #include <algorithm>
-#include "rlgl.h"
 
-std::vector<ElectronParticle> GenerateElectronCloud(std::mt19937& rng, int particleCount) {
-    std::vector<ElectronParticle> cloud;
-    std::normal_distribution<float> shell1s(1.2f, 0.2f);
-    std::normal_distribution<float> shell2s(3.5f, 0.5f);
-    std::normal_distribution<float> shell2p(5.5f, 0.8f);
+const float a0 = 1.0f; 
+
+// --- Mathematical Wavefunctions (\psi) ---
+float Psi1s(float r, float theta, float phi) {
+    return 2.0f * std::pow(1.0f / a0, 1.5f) * std::exp(-r / a0) * (1.0f / std::sqrt(4.0f * PI));
+}
+
+float Psi2s(float r, float theta, float phi) {
+    return (1.0f / std::sqrt(2.0f)) * std::pow(1.0f / a0, 1.5f) * (1.0f - r / (2.0f * a0)) * std::exp(-r / (2.0f * a0)) * (1.0f / std::sqrt(4.0f * PI));
+}
+
+float Psi2pz(float r, float theta, float phi) {
+    return (1.0f / std::sqrt(24.0f)) * std::pow(1.0f / a0, 1.5f) * (r / a0) * std::exp(-r / (2.0f * a0)) * (std::sqrt(3.0f / (4.0f * PI)) * std::cos(theta));
+}
+
+float Psi2px(float r, float theta, float phi) {
+    return (1.0f / std::sqrt(24.0f)) * std::pow(1.0f / a0, 1.5f) * (r / a0) * std::exp(-r / (2.0f * a0)) * (std::sqrt(3.0f / (4.0f * PI)) * std::sin(theta) * std::cos(phi));
+}
+
+float Psi2py(float r, float theta, float phi) {
+    return (1.0f / std::sqrt(24.0f)) * std::pow(1.0f / a0, 1.5f) * (r / a0) * std::exp(-r / (2.0f * a0)) * (std::sqrt(3.0f / (4.0f * PI)) * std::sin(theta) * std::sin(phi));
+}
+
+// --- Space-Partitioned Metropolis Sampler ---
+Vector3 SampleBoundedOrbital(std::mt19937& rng, float (*Psi)(float, float, float), float minR, float maxR, OrbitalType type) {
+    std::uniform_real_distribution<float> stepDist(-0.4f, 0.4f); 
+    std::uniform_real_distribution<float> acceptDist(0.0f, 1.0f);
+    
+    // NEW: Randomize the initial direction on a unit sphere using basic trig
     std::uniform_real_distribution<float> angleDist(0.0f, 2.0f * PI);
-    std::uniform_real_distribution<float> uniformDist(0.0f, 1.0f);
+    std::uniform_real_distribution<float> uDist(-1.0f, 1.0f);
+    
+    float theta = angleDist(rng);
+    float u = uDist(rng);
+    float sqrtOneMinusU2 = std::sqrt(1.0f - u*u);
+    
+    // Scale the random unit vector slightly above the minimum radius boundary
+    float startR = minR + 0.1f;
+    Vector3 current = {
+        startR * sqrtOneMinusU2 * std::cos(theta),
+        startR * sqrtOneMinusU2 * std::sin(theta),
+        startR * u
+    }; 
+
+    // Override specific axes alignments for 2p states to make sure they fall into high-probability zones immediately
+    if (type == ORBITAL_2PX) current.x = (current.x > 0 ? 1.0f : -1.0f) * startR;
+    if (type == ORBITAL_2PY) current.y = (current.y > 0 ? 1.0f : -1.0f) * startR;
+    if (type == ORBITAL_2PZ) current.z = (current.z > 0 ? 1.0f : -1.0f) * startR;
+
+    for (int step = 0; step < 60; step++) {
+        Vector3 proposal = { current.x + stepDist(rng), current.y + stepDist(rng), current.z + stepDist(rng) };
+        
+        float r_prop = std::sqrt(proposal.x*proposal.x + proposal.y*proposal.y + proposal.z*proposal.z);
+        
+        if (r_prop < minR || r_prop > maxR) {
+            continue; 
+        }
+
+        float r_curr = std::sqrt(current.x*current.x + current.y*current.y + current.z*current.z);
+        float theta_curr = std::acos(current.z / (r_curr + 1e-6f));
+        float phi_curr = std::atan2(current.y, current.x);
+
+        float theta_prop = std::acos(proposal.z / (r_prop + 1e-6f));
+        float phi_prop = std::atan2(proposal.y, proposal.x);
+        
+        float p_curr = std::pow(Psi(r_curr, theta_curr, phi_curr), 2.0f);
+        float p_prop = std::pow(Psi(r_prop, theta_prop, phi_prop), 2.0f);
+        
+        if (p_curr == 0.0f || acceptDist(rng) < (p_prop / p_curr)) {
+            current = proposal;
+        }
+    }
+    return current;
+}
+std::vector<ElectronParticle> GenerateQuantumCloud(std::mt19937& rng, int particleCount) {
+    std::vector<ElectronParticle> cloud;
+    
+    int p1s  = particleCount * 0.250f;
+    int p2s  = particleCount * 0.250f;
+    int p2px = particleCount * 0.250f; // Paired shell (Dense)
+    int p2py = particleCount * 0.125f; // Unpaired shell (Sparse)
+    int p2pz = particleCount * 0.125f; // Unpaired shell (Sparse)
 
     for (int i = 0; i < particleCount; i++) {
         ElectronParticle p;
-        float theta = angleDist(rng);
-        float phi = std::acos(2.0f * uniformDist(rng) - 1.0f);
-        float radius = 0.0f;
-
-        if (i < 1000) { radius = shell1s(rng); p.alpha = 0.4f; } 
-        else if (i < 2000) { radius = shell2s(rng); p.alpha = 0.25f; } 
+        
+        if (i < p1s) {
+            p.type = ORBITAL_1S;
+            p.position = SampleBoundedOrbital(rng, Psi1s, 1.1f, 2.2f, p.type);
+            p.alpha = 0.40f;
+        } 
+        else if (i < p1s + p2s) {
+            p.type = ORBITAL_2S;
+            p.position = SampleBoundedOrbital(rng, Psi2s, 2.2f, 4.8f, p.type); 
+            p.alpha = 0.22f;
+        } 
+        else if (i < p1s + p2s + p2px) {
+            p.type = ORBITAL_2PX;
+            p.position = SampleBoundedOrbital(rng, Psi2px, 0.4f, 8.5f, p.type);
+            p.alpha = 0.35f; 
+        } 
+        else if (i < p1s + p2s + p2px + p2py) {
+            p.type = ORBITAL_2PY;
+            p.position = SampleBoundedOrbital(rng, Psi2py, 0.4f, 8.5f, p.type);
+            p.alpha = 0.20f; 
+        } 
         else {
-            radius = shell2p(rng); p.alpha = 0.35f;
-            int subOrbital = i % 3; 
-            if (subOrbital == 0) {
-                while (uniformDist(rng) > (std::cos(phi) * std::cos(phi))) phi = std::acos(2.0f * uniformDist(rng) - 1.0f);
-            } else if (subOrbital == 1) {
-                while (uniformDist(rng) > (std::sin(phi) * std::sin(phi) * std::cos(theta) * std::cos(theta))) {
-                    phi = std::acos(2.0f * uniformDist(rng) - 1.0f); theta = angleDist(rng);
-                }
-            } else {
-                while (uniformDist(rng) > (std::sin(phi) * std::sin(phi) * std::sin(theta) * std::sin(theta))) {
-                    phi = std::acos(2.0f * uniformDist(rng) - 1.0f); theta = angleDist(rng);
-                }
-            }
+            p.type = ORBITAL_2PZ;
+            p.position = SampleBoundedOrbital(rng, Psi2pz, 0.4f, 8.5f, p.type);
+            p.alpha = 0.20f; 
         }
-        if (radius < 0.4f) radius = 0.4f;
-        p.position.x = radius * std::sin(phi) * std::cos(theta);
-        p.position.y = radius * std::sin(phi) * std::sin(theta);
-        p.position.z = radius * std::cos(phi);
-        p.targetRadius = radius;
-        p.speed = 2.5f / radius; 
+        
         p.distanceToCam = 0.0f;
         cloud.push_back(p);
     }
     return cloud;
 }
 
-void UpdateElectronCloud(std::vector<ElectronParticle>& cloud, std::mt19937& rng, std::uniform_real_distribution<float>& dist, Vector3 cameraPos, float timeStep) {
+void UpdateQuantumCloud(std::vector<ElectronParticle>& cloud, Vector3 cameraPos) {
     for (auto& ep : cloud) {
-        float speedMult = ep.speed * timeStep;
-        
-        float cosS = std::cos(speedMult), sinS = std::sin(speedMult);
-        float x = ep.position.x, z = ep.position.z;
-
-        ep.position.x = x * cosS - z * sinS;
-        ep.position.z = x * sinS + z * cosS;
-        
-        ep.alpha += dist(rng) * 0.01f;
-        if (ep.alpha < 0.05f) ep.alpha = 0.05f;
-        if (ep.alpha > 0.5f)  ep.alpha = 0.5f;
-
         ep.distanceToCam = Vector3Distance(ep.position, cameraPos);
     }
-
-    // Depth-Sort transparency layout pass
     std::sort(cloud.begin(), cloud.end(), [](const ElectronParticle& a, const ElectronParticle& b) {
         return a.distanceToCam > b.distanceToCam;
     });
 }
 
 void DrawElectronCloud(const std::vector<ElectronParticle>& cloud, Camera3D camera, Texture2D orbTexture) {
-    rlDisableDepthMask();
+    rlDisableDepthMask(); 
     BeginBlendMode(BLEND_ADDITIVE);
+    
+    float time = GetTime();
+    
     for (const auto& p : cloud) {
-        Color c = { 0, 210, 255, static_cast<unsigned char>(p.alpha * 255) };
-        DrawBillboard(camera, orbTexture, p.position, 0.08f, c);
+        Color c;
+
+        float quantumFlicker = 0.8f + 0.2f * std::sin(time * 3.0f + p.position.x * p.position.y);
+        float targeAlpha = p.alpha * quantumFlicker;   
+        unsigned char brightAlpha = static_cast<unsigned char>(fminf(targeAlpha * 255.f, 255.0f));
+        switch (p.type) {
+            case ORBITAL_1S:  c = { 50, 180, 255, brightAlpha };  break; // Deep Royal Blue
+            case ORBITAL_2S:  c = { 0, 255, 255, brightAlpha };  break; // FIXED: True Cyan
+            case ORBITAL_2PX: c = { 255, 0, 150, brightAlpha };  break; // Magenta (X axis)
+            case ORBITAL_2PY: c = { 200, 50, 255, brightAlpha }; break; // Purple (Y axis)
+            case ORBITAL_2PZ: c = { 255, 160, 0, brightAlpha };  break; // Amber (Z axis)
+        }
+        DrawBillboard(camera, orbTexture, p.position, 0.07f, c);
     }
+    
+    EndBlendMode();
+    rlEnableDepthMask(); 
+}
+
+void DrawOrbitalBoundaries(Camera3D camera) {
+    rlDisableDepthMask();
+    BeginBlendMode(BLEND_ALPHA);
+
+    // Dropped alpha down to 8 and 5 out of 255 for a whisper-thin containment look
+    DrawSphere({ 0.0f, 0.0f, 0.0f }, 2.2f, Color{ 0, 120, 255, 8 });
+    DrawSphere({ 0.0f, 0.0f, 0.0f }, 4.8f, Color{ 0, 230, 240, 5 });
+
     EndBlendMode();
     rlEnableDepthMask();
 }

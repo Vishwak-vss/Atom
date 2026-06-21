@@ -1,6 +1,9 @@
 #include "raylib.h"
 #include "nucleon.h"
 #include "electron.h"
+#include <random>
+#include <cmath>
+#include <vector>
 
 const char* bloomShaderCode = 
     "#version 330\n"
@@ -21,7 +24,9 @@ const char* bloomShaderCode =
     "    sum += texture(texture0, fragTexCoord + vec2(1.0, 1.0)*texelSize) * 0.12;\n"
     "    sum += texture(texture0, fragTexCoord + vec2(2.0, 2.0)*texelSize) * 0.05;\n"
     "    vec4 original = texture(texture0, fragTexCoord);\n"
-    "    finalColor = original + sum * 0.8;\n"
+    "    \n"
+    "    // FIXED: Boosted from 1.5 to 2.5 for maximum electron cloud luminosity\n"
+    "    finalColor = original + (sum * 2.5);\n" 
     "}\n";
 
 int main() {
@@ -29,8 +34,9 @@ int main() {
     const int screenHeight = 800;
     
     SetConfigFlags(FLAG_MSAA_4X_HINT); 
-    InitWindow(screenWidth, screenHeight, "Oxygen Atom - Refactored");
+    InitWindow(screenWidth, screenHeight, "Oxygen Atom - High-Fidelity Quantum Model");
 
+    // Camera perspective set up straight down the Z-axis to cleanly display X and Y boundaries
     Camera3D camera = { 0 };
     camera.position = { 0.0f, 0.0f, 20.0f };
     camera.target   = { 0.0f, 0.0f, 0.0f };
@@ -47,11 +53,11 @@ int main() {
     std::mt19937 rng(1337);
     std::uniform_real_distribution<float> dist(-0.7f, 0.7f);
 
-    // Call modular setup components
+    // Structural initialization
     std::vector<Nucleon> nucleus = GenerateNucleus(rng);
-    std::vector<ElectronParticle> electronCloud = GenerateElectronCloud(rng, 4000);
+    std::vector<ElectronParticle> electronCloud = GenerateQuantumCloud(rng, 4000);
 
-    // Generate high-resolution soft orb texture
+    // Generate high-resolution soft orb texture for billboards
     const int texSize = 64;
     Image img = GenImageColor(texSize, texSize, BLANK);
     for (int y = 0; y < texSize; y++) {
@@ -69,23 +75,30 @@ int main() {
     UnloadImage(img); 
     
     while (!WindowShouldClose()) {
+        // FIXED: Removed UpdateCamera execution completely to drop the artificial spinning orbital motion.
+        // This lets us view the asymmetric 2p subshell geometry relative to our viewport flawlessly.
         UpdateCamera(&camera, CAMERA_ORBITAL);
-        
-        // Update module positions
-        float customTimeStep = 0.02f;
-        UpdateElectronCloud(electronCloud, rng, dist, camera.position, GetFrameTime() * customTimeStep);
-        // UpdateElectronCloud(electronCloud, rng, dist, camera.position, 0.06f);
+        // Sort and pass real-time camera depth fields 
+        UpdateQuantumCloud(electronCloud, camera.position);
 
-        // Rendering Pipeline Pass
+        // Render Pipeline
         BeginTextureMode(target);
             ClearBackground(BLACK);
             BeginMode3D(camera);
+                
+                // 1. Core nucleus plus its translucent boundary containment capsule
                 DrawNucleus(nucleus);
+                
+                // 2. Translucent wireframe shells for 1s and 2s states (Minus grid lines)
+                DrawOrbitalBoundaries(camera);
+                
+                // 3. Brightened wave amplitude representations matching real quantum configuration ratios
                 DrawElectronCloud(electronCloud, camera, orbTexture);
                 
             EndMode3D();
         EndTextureMode();
 
+        // Screen Post-Processing Presentation Pass
         BeginDrawing();
             ClearBackground(BLACK);
             BeginShaderMode(bloomShader);
@@ -93,10 +106,11 @@ int main() {
             EndShaderMode();
 
             DrawFPS(10, 10);
-            DrawText("Oxygen Atom (16-O) Modular High-Fidelity Simulation", 10, 40, 20, RAYWHITE);
+            DrawText("Oxygen Atom (16-O) Bounded Wavefunction Simulation", 10, 40, 20, RAYWHITE);
         EndDrawing();
     }
 
+    // Resource Cleanup
     UnloadShader(bloomShader);
     UnloadTexture(orbTexture);
     UnloadRenderTexture(target);
