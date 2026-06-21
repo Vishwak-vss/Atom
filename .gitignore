@@ -1,0 +1,9 @@
+# Ignore the compiled executable binaries
+*.exe
+sole_atom
+improve_sole_atom
+Atom_Sim
+Atom_Sim2
+
+# Ignore local build tool caching
+.w64devkit/
